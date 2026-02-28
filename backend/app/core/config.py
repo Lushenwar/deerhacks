@@ -7,11 +7,8 @@ from typing import List
 
 
 class Settings(BaseSettings):
-    # ── Gemini ──
-    GEMINI_API_KEY: str = ""
-
-    # ── Google Places ──
-    GOOGLE_PLACES_API_KEY: str = ""
+    # ── Google Cloud (Gemini + Google Places) ──
+    GOOGLE_CLOUD_API_KEY: str = ""
 
     # ── Yelp ──
     YELP_API_KEY: str = ""

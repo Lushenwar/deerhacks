@@ -21,7 +21,8 @@ async def create_plan(request: PlanRequest):
     initial_state = {
         "raw_prompt": request.prompt,
         "parsed_intent": {},
-        "complexity_tier": "full",
+        "complexity_tier": "tier_2",
+        "active_agents": [],
         "agent_weights": {},
         "candidate_venues": [],
         "vibe_scores": {},

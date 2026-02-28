@@ -11,7 +11,8 @@ class PathfinderState(TypedDict, total=False):
     # ── Commander outputs ──
     raw_prompt: str
     parsed_intent: dict
-    complexity_tier: str          # "quick" | "full" | "adversarial"
+    complexity_tier: str          # "tier_1" | "tier_2" | "tier_3"
+    active_agents: List[str]      # which agents to run for this query
     agent_weights: dict           # e.g. {"vibe": 0.3, "cost": 0.5, ...}
 
     # ── Scout outputs ──
@@ -37,3 +38,4 @@ class PathfinderState(TypedDict, total=False):
 
     # ── Snowflake context ──
     snowflake_context: Any
+

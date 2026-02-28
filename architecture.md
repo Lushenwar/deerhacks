@@ -32,22 +32,58 @@ The system is built around a multi-agent LangGraph workflow, coordinated by a ce
   `"Basketball for 10 people, budget-friendly, west end"`
   into a structured execution state.
 
-- **Complexity Tiering:** Determines whether the request needs:
-  - Quick lookup
-  - Full multi-agent evaluation
-  - Adversarial re-checks
+- **Complexity Tiering:** Classifies every query into one of three tiers:
+
+  | Tier | Description | Agents Activated | Example |
+  |------|-------------|------------------|---------|
+  | **Tier 1** — Simple Lookup | Straightforward location query | Fast-path: Scout + light LLM layer | *"Where's a good pizza place nearby?"* |
+  | **Tier 2** — Multi-Factor Personal | Group activity with multiple constraints | 3–4 agents (Scout, Cost, Access, Critic ± Vibe) | *"Basketball court for 10 people, budget-friendly"* |
+  | **Tier 3** — Strategic / Business | Deep research across all dimensions | All 5 worker agents, deeper analysis | *"Open a bakery in Austin targeting young professionals"* |
+
+- **Dynamic Agent Activation:**
+  The Commander decides **which agents to activate per query** based on intent:
+
+  | Query | Agents Activated | Rationale |
+  |-------|------------------|-----------|
+  | Basketball court rental | SCOUT, COST, ACCESS, CRITIC | Vibe is lower priority for a sports booking |
+  | Birthday venue for kids | ALL five agents | Every dimension matters (vibe, cost, access, risk) |
+  | Bubble tea shop | ALL five agents | Heavier COST + VIBE weighting |
+  | Bakery site selection | ALL five agents | Strategic query — deep research across all dimensions |
 
 - **Dynamic Weighting:**
   Adjusts agent influence in real time:
-  - "Cheap" → Cost Analyst ↑
-  - "Aesthetic / vibe" → Vibe Matcher ↑
-  - "Outdoor" → Critic ↑
+  - "Cheap" / "budget" → Cost Analyst ↑
+  - "Aesthetic" / "vibe" / "cozy" → Vibe Matcher ↑
+  - "Outdoor" / "weather" → Critic ↑
+  - "Near me" / "transit" → Access Analyst ↑
 
 - **Snowflake Pre-Check:**
   Queries Snowflake Cortex for historical risk patterns (e.g., weather failures, noise complaints) and preemptively boosts the Critic's priority if needed.
 
 **Output:**
 A fully weighted execution plan passed into LangGraph.
+
+**Structured Output Schema:**
+```json
+{
+  "parsed_intent": {
+    "activity": "basketball",
+    "group_size": 10,
+    "budget": "low",
+    "location": "west end",
+    "vibe": null
+  },
+  "complexity_tier": "tier_2",
+  "active_agents": ["scout", "cost_analyst", "access_analyst", "critic"],
+  "agent_weights": {
+    "scout": 1.0,
+    "vibe_matcher": 0.2,
+    "access_analyst": 0.8,
+    "cost_analyst": 0.9,
+    "critic": 0.7
+  }
+}
+```
 
 ---
 
@@ -74,6 +110,27 @@ A fully weighted execution plan passed into LangGraph.
 
 **Output:**
 A shortlist of enriched candidate venues.
+
+**Structured Output Schema:**
+```json
+{
+  "candidates": [
+    {
+      "venue_id": "gp_abc123",
+      "name": "West End Courts",
+      "address": "123 King St W, Toronto",
+      "lat": 43.6452,
+      "lng": -79.3961,
+      "rating": 4.3,
+      "review_count": 87,
+      "photos": ["url1", "url2"],
+      "category": "sports_complex",
+      "source": "google_places",
+      "snowflake_flags": ["seasonal_closure_dec"]
+    }
+  ]
+}
+```
 
 ---
 
@@ -104,6 +161,20 @@ A shortlist of enriched candidate venues.
 **Output:**
 A normalized Vibe Score per venue + qualitative descriptors.
 
+**Structured Output Schema:**
+```json
+{
+  "vibe_scores": {
+    "gp_abc123": {
+      "score": 0.72,
+      "style": "cozy",
+      "descriptors": ["warm lighting", "exposed brick", "intimate seating"],
+      "confidence": 0.85
+    }
+  }
+}
+```
+
 ---
 
 ### Node 4: The ACCESS ANALYST (Logistics Node)
@@ -130,6 +201,23 @@ A normalized Vibe Score per venue + qualitative descriptors.
 **Output:**
 Accessibility scores + map-ready spatial data.
 
+**Structured Output Schema:**
+```json
+{
+  "accessibility_scores": {
+    "gp_abc123": {
+      "score": 0.81,
+      "avg_travel_min": 18,
+      "max_travel_min": 32,
+      "transit_accessible": true
+    }
+  },
+  "isochrones": {
+    "gp_abc123": { "type": "FeatureCollection", "features": ["..."] }
+  }
+}
+```
+
 ---
 
 ### Node 5: The COST ANALYST (Financial Node)
@@ -139,7 +227,12 @@ Accessibility scores + map-ready spatial data.
 
 **Responsibilities:**
 
-- Scrapes venue websites to compute **Total Cost of Attendance (TCA)**:
+- **Web Scraping Strategy (Firecrawl + Jina Reader):**
+  1. **Firecrawl `/map`** — Crawl each venue's website to automatically discover the "Pricing" or "Menu" page.
+  2. **Jina Reader** — Fetch "General Info" / "About" pages as clean markdown via `https://r.jina.ai/<url>` (zero config, no API key, acts as a fallback if Firecrawl is rate-limited).
+  3. **Firecrawl `/scrape`** — Extract structured pricing data from the discovered pricing page using a **Pydantic schema** for typed output.
+
+- Computes **Total Cost of Attendance (TCA)**:
   - Hidden fees
   - Equipment rentals
   - Minimum spends
@@ -151,6 +244,22 @@ Accessibility scores + map-ready spatial data.
 
 **Output:**
 Transparent, normalized cost profiles per venue.
+
+**Structured Output Schema:**
+```json
+{
+  "cost_profiles": {
+    "gp_abc123": {
+      "base_cost": 25.00,
+      "hidden_costs": [{"label": "2-hr minimum", "amount": 25.00}],
+      "total_cost_of_attendance": 50.00,
+      "per_person": 5.00,
+      "value_score": 0.78,
+      "price_trend": "stable"
+    }
+  }
+}
+```
 
 ---
 
@@ -179,6 +288,24 @@ Transparent, normalized cost profiles per venue.
 
 **Output:**
 Risk flags, veto signals, and explicit warnings.
+
+**Structured Output Schema:**
+```json
+{
+  "risk_flags": {
+    "gp_abc123": [
+      {
+        "type": "weather",
+        "severity": "high",
+        "detail": "80% chance of rain Saturday afternoon",
+        "source": "openweather"
+      }
+    ]
+  },
+  "veto": false,
+  "veto_reason": null
+}
+```
 
 ---
 
@@ -246,6 +373,62 @@ The Commander collects all node outputs, applies final dynamic weights, and emit
 
 - **Auth0 Favorites:**
   Save "High Vibe" locations and feed them back into Commander weight personalization.
+
+### 👥 Crowd Analyst — Social Proof Node (Optional)
+
+Add a dedicated agent for review aggregation, competitor density mapping, and social proof scoring.
+
+**Key Ideas:**
+- Aggregate and weight reviews across sources (star ratings, volume, recency, sentiment).
+- Demographic-specific filtering (e.g., parent reviews for kid venues).
+- Map competitor density — identify underserved zones (valuable for business/strategic queries).
+- Compute a normalised **Crowd Score** per venue.
+
+**Why optional:** The Scout already collects ratings/reviews from Google Places & Yelp, and the Vibe Matcher performs sentiment analysis. A dedicated Crowd Analyst adds value for business-tier queries but is not essential for the core pipeline.
+
+**Integration Point:** Sits alongside the other analysts in the fan-out from Scout → Critic.
+
+### 🎙️ ElevenLabs — Voice Interface for the Commander
+
+Add a conversational voice layer so users can speak queries
+(e.g. *"find me a birthday venue for 25 kids under $500"*)
+and PATHFINDER responds with a natural-sounding voice summary of its recommendations.
+
+**Key Ideas:**
+- **Speech-to-Text input** → feeds directly into the Commander's intent parser.
+- **Text-to-Speech output** → each agent could have a **distinct voice personality** when presenting its findings:
+  - The **Critic** sounds skeptical.
+  - The **Vibe Matcher** sounds enthusiastic.
+  - The **Cost Analyst** sounds measured and precise.
+- Creates a memorable, demo-ready experience.
+
+**Integration Point:** Commander Node (input) + Final Synthesis (output).
+
+---
+
+### 🪙 Solana — Booking & Payment Layer
+
+Add an on-chain micro-payment or escrow system tied to PATHFINDER's venue recommendations.
+
+**Key Ideas:**
+- **Deposit lock-in:** When PATHFINDER finds the best venue, users can lock in a deposit via Solana.
+- **Tokenised group cost-splitting:** If 10 people are splitting a court rental, a Solana transaction handles instant, near-zero-fee splits.
+- **Escrow protection:** Funds are held until the booking is confirmed, providing trust for both sides.
+
+**Integration Point:** Cost Analyst Node → triggers a Solana pay flow on the frontend after the user confirms a venue.
+
+---
+
+### ☁️ Vultr — Cloud Infrastructure
+
+Host the multi-agent system on Vultr's cloud compute for production-grade performance.
+
+**Key Ideas:**
+- **GPU-accelerated inference:** If any agent uses GPU-intensive tasks (Gemini calls, embedding generation for semantic search over reviews, etc.), Vultr Cloud GPUs can power that.
+- **One-click deployment:** Use Vultr's deployment tooling to spin up the FastAPI backend quickly.
+- **Scalable compute:** Scale agent workers independently based on traffic.
+
+**Integration Point:** Infrastructure layer — backend hosting, GPU compute, and deployment pipeline.
 
 ---
 
@@ -318,15 +501,93 @@ The Commander collects all node outputs, applies final dynamic weights, and emit
 
 | Node | Model / Tooling | Purpose |
 |------|----------------|---------|
-| Commander | Gemini 1.5 Flash | Intent parsing, complexity tiering, dynamic agent weighting |
+| Commander | Gemini 1.5 Flash | Intent parsing, complexity tiering, dynamic agent activation & weighting |
 | Scout | Google Places API, Yelp Fusion | Venue discovery and raw metadata collection |
 | Vibe Matcher | Gemini 1.5 Pro (Multimodal) | Aesthetic, photo-based, and sentiment-driven vibe analysis |
 | Access Analyst | Mapbox Isochrone API, Google Distance Matrix | Travel-time feasibility and spatial scoring |
 | Cost Analyst | Firecrawl, Jina Reader + Snowflake Cortex | True cost extraction and pricing anomaly detection |
+| Crowd Analyst *(optional)* | Google Places Reviews, Yelp Reviews + Snowflake | Review aggregation, competitor density, social proof scoring |
 | Critic | Gemini (Adversarial Reasoning) + OpenWeather, PredictHQ | Failure detection, risk forecasting, veto logic |
 | Memory & RAG | Snowflake + Snowflake Cortex Search | Historical risk storage and predictive intelligence |
 | Orchestration | LangGraph | Execution order, shared state, conditional retries |
 | Frontend Mapping | Mapbox SDK | Interactive maps, pins, isochrone overlays |
+
+---
+
+## 🎯 Demo Strategy
+
+Three pre-tested queries that showcase PATHFINDER's versatility — demonstrating the system isn't a one-trick demo but a genuine **location intelligence platform**.
+
+### Query 1 — Personal / Fun
+
+> *"My friends and I (8 people) want to rent a basketball court this Saturday afternoon in downtown Toronto. Under $200."*
+
+**Expected agent behaviour:**
+
+| Agent | Output |
+|-------|--------|
+| SCOUT | Map shows 5–6 candidate courts |
+| COST ANALYST | Flags: "One court is $25/hr but requires a 2-hour minimum" |
+| ACCESS ANALYST | Shows drive-time isochrones from group's central location |
+| CRITIC | "This outdoor court has no lights — sunset is at 5:30 PM Saturday" |
+
+**Judge takeaway:** *"Oh, this is useful for regular people."*
+
+---
+
+### Query 2 — Family / Emotional
+
+> *"Birthday party for my daughter turning 7. She loves dinosaurs and painting. 20 kids, budget $400–600, in the Waterloo/Kitchener area."*
+
+**Expected agent behaviour:**
+
+| Agent | Output |
+|-------|--------|
+| VIBE MATCHER | "This venue offers themed parties including 'Dino Discovery' package" |
+| COST ANALYST | "The $450 package includes 20 kids but painting supplies are $8/kid extra — total $610, over budget. Venue B's $500 package includes art supplies." |
+| SCOUT | "Venue A: 4.8★ from 200 parent reviews vs. Venue B: 4.1★ from 45" |
+| CRITIC | "Venue A's parking lot only fits 12 cars — with 20 kids that's a logistics problem" |
+
+**Judge takeaway:** *"Wait, it handles this too? And the analysis is different?"*
+
+---
+
+### Query 3 — Business / Strategic
+
+> *"I want to open a small bakery in Austin. Targeting young professionals. Budget for lease under $4k/month."*
+
+**Expected agent behaviour:**
+
+| Agent | Output |
+|-------|--------|
+| SCOUT | Finds available retail spaces; maps competitor bakeries; identifies underserved zones |
+| ACCESS ANALYST | Shows foot traffic and transit data |
+| COST ANALYST | Compares lease rates against market averages |
+
+**Judge takeaway:** *"This is the same architecture handling wildly different problems."*
+
+> The "wait what" moment is the **versatility**. Judges realise this isn't a one-trick demo — it's a genuine location intelligence platform.
+
+---
+
+## ✅ Quality Control
+
+### 1. Complexity-Based Agent Activation
+
+The Commander classifies each query and only activates the agents that matter. This keeps simple queries fast (Tier 1: ≤2 agents) and complex queries thorough (Tier 3: all 5 agents).
+
+### 2. Structured Output Schemas
+
+Every agent returns **typed JSON** — not free text. This ensures:
+- Consistent quality regardless of query domain
+- Reliable frontend rendering (no parsing surprises)
+- Easy testing and validation
+
+See each node's "Structured Output Schema" section above for the exact shape.
+
+### 3. Pre-Seeded Demo Scenarios
+
+For the live demo, use the three queries documented in the Demo Strategy section. These should be tested extensively beforehand. Let the system handle novel queries, but **don't demo untested queries live** unless confidence is high.
 
 ---
 
@@ -336,3 +597,4 @@ The Commander collects all node outputs, applies final dynamic weights, and emit
 - **Gemini 1.5 Pro** is reserved for high-value multimodal reasoning (vibe).
 - **Snowflake Cortex** ensures the system improves over time instead of repeating failures.
 - **LangGraph** enables controlled retries without infinite loops or silent failures.
+- **Dynamic agent activation** means simple queries use 3–4 agents efficiently, while complex queries engage all 5 deeply — the activation itself is a demo-worthy feature.
